@@ -3,6 +3,7 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <sys/random.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -22,18 +23,77 @@ typedef enum {
     OSRAND_MODE_DEVRANDOM
 } OSRAND_MODE;
 
+typedef struct {
+    int fd;
+    dev_t dev;
+    ino_t ino;
+    mode_t mode;
+    dev_t rdev;
+} OSRAND_RANDOM_DEVICE;
+
 /* Context structure */
 typedef struct {
     OSRAND_MODE mode; /* Current mode */
+    OSRAND_RANDOM_DEVICE rd; /* Random device if device used */
 } OSRAND_CONTEXT;
 
+/* Check whether random device fd is still open and device is valid */
+static int osrand_check_random_device(OSRAND_RANDOM_DEVICE *rd)
+{
+    struct stat st;
+
+    return rd->fd != -1
+           && fstat(rd->fd, &st) != -1
+           && rd->dev == st.st_dev
+           && rd->ino == st.st_ino
+           && ((rd->mode ^ st.st_mode) & ~(S_IRWXU | S_IRWXG | S_IRWXO)) == 0
+           && rd->rdev == st.st_rdev;
+}
+
+/* Open a random device if required and return its file descriptor */
+static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
+                                    const char *device_path)
+{
+    struct stat st;
+
+    /* reuse existing file descriptor if it is (still) valid */
+    if (osrand_check_random_device(rd))
+        return rd->fd;
+
+    /* open the random device ... */
+    if ((rd->fd = open(device_path, O_RDONLY)) == -1)
+        return rd->fd;
+
+    /* ... and cache its relevant stat(2) data */
+    if (fstat(rd->fd, &st) != -1) {
+        rd->dev = st.st_dev;
+        rd->ino = st.st_ino;
+        rd->mode = st.st_mode;
+        rd->rdev = st.st_rdev;
+    } else {
+        close(rd->fd);
+        rd->fd = -1;
+    }
+
+    return rd->fd;
+}
+
+/* Close a random device making sure it is a random device */
+static void osrand_close_random_device(OSRAND_RANDOM_DEVICE *rd)
+{
+    if (osrand_check_random_device(rd))
+        close(rd->fd);
+    rd->fd = -1;
+}
+
 /* Generate random bytes using a device file */
-static int osrand_generate_from_device(const char *device_path,
+static int osrand_generate_from_device(OSRAND_CONTEXT *ctx,
+                                       const char *device_path,
                                        unsigned char *buf, size_t buflen)
 {
-    int fd = open(device_path, O_RDONLY);
+    int fd = osrand_get_random_device(&ctx->rd, device_path);
     if (fd == -1) {
-        return RET_OSSL_ERR; /* Failed to open device */
+        return RET_OSSL_ERR; /* Failed to retrieving the device */
     }
 
     ssize_t total_read = 0;
@@ -43,13 +103,11 @@ static int osrand_generate_from_device(const char *device_path,
             if (ret == -1 && errno == EINTR) {
                 continue; /* Retry on interrupt */
             }
-            close(fd);
             return RET_OSSL_ERR; /* Read error */
         }
         total_read += ret;
     }
 
-    close(fd);
     return RET_OSSL_OK;
 }
 
@@ -72,9 +130,9 @@ static int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
     case OSRAND_MODE_GETRANDOM:
         return osrand_generate_using_getrandom(buf, buflen);
     case OSRAND_MODE_DEVLRNG:
-        return osrand_generate_from_device("/dev/lrng", buf, buflen);
+        return osrand_generate_from_device(ctx, "/dev/lrng", buf, buflen);
     case OSRAND_MODE_DEVRANDOM:
-        return osrand_generate_from_device("/dev/random", buf, buflen);
+        return osrand_generate_from_device(ctx, "/dev/random", buf, buflen);
     default:
         return RET_OSSL_ERR; /* Unknown mode */
     }
@@ -82,8 +140,8 @@ static int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
 
 /* RAND reseed function */
 static int osrand_reseed(void *pctx, int prediction_resistance,
-                               const unsigned char *entropy, size_t ent_len,
-                               const unsigned char *adin, size_t adin_len)
+                         const unsigned char *entropy, size_t ent_len,
+                         const unsigned char *adin, size_t adin_len)
 {
     return RET_OSSL_OK;
 }
@@ -101,10 +159,11 @@ static void *osrand_newctx(void *provctx)
 static void osrand_freectx(void *vctx)
 {
     OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    osrand_close_random_device(&ctx->rd);
     OPENSSL_free(ctx);
 }
 
-static int osrand_instantiate(void *pctx, unsigned int strength,
+static int osrand_instantiate(void *vctx, unsigned int strength,
                               int prediction_resistance,
                               const unsigned char *pstr, size_t pstr_len,
                               const OSSL_PARAM params[])
@@ -112,8 +171,10 @@ static int osrand_instantiate(void *pctx, unsigned int strength,
     return RET_OSSL_OK;
 }
 
-static int osrand_uninstantiate(void *pctx)
+static int osrand_uninstantiate(void *vctx)
 {
+    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    osrand_close_random_device(&ctx->rd);
     return RET_OSSL_OK;
 }
 
