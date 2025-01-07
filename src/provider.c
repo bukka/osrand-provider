@@ -23,6 +23,12 @@ typedef enum {
     OSRAND_MODE_DEVRANDOM
 } OSRAND_MODE;
 
+#define OSRAND_PARAM_MODE "osrand-mode"
+
+#define OSRAND_MODE_GETRANDOM_NAME "getrandom"
+#define OSRAND_MODE_DEVLRNG_NAME "devlrng"
+#define OSRAND_MODE_DEVRANDOM_NAME "devrandom"
+
 typedef struct {
     int fd;
     dev_t dev;
@@ -42,9 +48,7 @@ static int osrand_check_random_device(OSRAND_RANDOM_DEVICE *rd)
 {
     struct stat st;
 
-    return rd->fd != -1
-           && fstat(rd->fd, &st) != -1
-           && rd->dev == st.st_dev
+    return rd->fd != -1 && fstat(rd->fd, &st) != -1 && rd->dev == st.st_dev
            && rd->ino == st.st_ino
            && ((rd->mode ^ st.st_mode) & ~(S_IRWXU | S_IRWXG | S_IRWXO)) == 0
            && rd->rdev == st.st_rdev;
@@ -57,12 +61,10 @@ static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
     struct stat st;
 
     /* reuse existing file descriptor if it is (still) valid */
-    if (osrand_check_random_device(rd))
-        return rd->fd;
+    if (osrand_check_random_device(rd)) return rd->fd;
 
     /* open the random device ... */
-    if ((rd->fd = open(device_path, O_RDONLY)) == -1)
-        return rd->fd;
+    if ((rd->fd = open(device_path, O_RDONLY)) == -1) return rd->fd;
 
     /* ... and cache its relevant stat(2) data */
     if (fstat(rd->fd, &st) != -1) {
@@ -81,8 +83,7 @@ static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
 /* Close a random device making sure it is a random device */
 static void osrand_close_random_device(OSRAND_RANDOM_DEVICE *rd)
 {
-    if (osrand_check_random_device(rd))
-        close(rd->fd);
+    if (osrand_check_random_device(rd)) close(rd->fd);
     rd->fd = -1;
 }
 
@@ -179,28 +180,27 @@ static int osrand_uninstantiate(void *vctx)
     return RET_OSSL_OK;
 }
 
-
 /* RAND set parameters */
-static int osrand_get_params(void *vctx, OSSL_PARAM params[])
+static int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
 {
     OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
     OSSL_PARAM *p;
     int ret;
 
-    p = OSSL_PARAM_locate(params, "mode");
+    p = OSSL_PARAM_locate(params, OSRAND_PARAM_MODE);
     if (p != NULL) {
         switch (ctx->mode) {
-            case OSRAND_MODE_GETRANDOM:
-                ret = OSSL_PARAM_set_utf8_string(p, "getrandom");
-                break;
-            case OSRAND_MODE_DEVLRNG:
-                ret = OSSL_PARAM_set_utf8_string(p, "devlrng");
-                break;
-            case OSRAND_MODE_DEVRANDOM:
-                ret = OSSL_PARAM_set_utf8_string(p, "devrandom");
-                break;
-            default:
-                ret = 0;
+        case OSRAND_MODE_GETRANDOM:
+            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_GETRANDOM_NAME);
+            break;
+        case OSRAND_MODE_DEVLRNG:
+            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_DEVLRNG_NAME);
+            break;
+        case OSRAND_MODE_DEVRANDOM:
+            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_DEVRANDOM_NAME);
+            break;
+        default:
+            ret = 0;
         }
         if (ret != RET_OSSL_OK) {
             return ret;
@@ -219,24 +219,42 @@ static int osrand_get_params(void *vctx, OSSL_PARAM params[])
 }
 
 /* RAND set parameters */
-static int osrand_set_params(void *vctx, const OSSL_PARAM params[])
+static int osrand_set_ctx_params(void *vctx, const OSSL_PARAM params[])
 {
     OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
     const OSSL_PARAM *p;
 
-    p = OSSL_PARAM_locate_const(params, "mode");
+    p = OSSL_PARAM_locate_const(params, OSRAND_PARAM_MODE);
     if (p != NULL && p->data_type == OSSL_PARAM_UTF8_STRING) {
-        if (strcmp(p->data, "getrandom") == 0) {
+        if (strcmp(p->data, OSRAND_MODE_GETRANDOM_NAME) == 0) {
             ctx->mode = OSRAND_MODE_GETRANDOM;
-        } else if (strcmp(p->data, "devlrng") == 0) {
+        } else if (strcmp(p->data, OSRAND_MODE_DEVLRNG_NAME) == 0) {
             ctx->mode = OSRAND_MODE_DEVLRNG;
-        } else if (strcmp(p->data, "devrandom") == 0) {
+        } else if (strcmp(p->data, OSRAND_MODE_DEVRANDOM_NAME) == 0) {
             ctx->mode = OSRAND_MODE_DEVRANDOM;
         } else {
             return 0; /* Invalid mode */
         }
     }
     return 1;
+}
+
+static const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
+{
+    static const OSSL_PARAM params[] = {
+        OSSL_PARAM_utf8_string(OSRAND_PARAM_MODE, NULL, 0),
+        OSSL_PARAM_END,
+    };
+    return params;
+}
+
+static const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov)
+{
+    static const OSSL_PARAM params[] = {
+        OSSL_PARAM_utf8_string(OSRAND_PARAM_MODE, NULL, 0),
+        OSSL_PARAM_END,
+    };
+    return params;
 }
 
 static int osrand_enable_locking(void *pctx)
@@ -254,7 +272,6 @@ static void osrand_unlock(void *pctx)
     /* nothing to do */
 }
 
-
 /* RAND methods */
 static const OSSL_DISPATCH osrand_rand_functions[] = {
     { OSSL_FUNC_RAND_NEWCTX, (void (*)(void))osrand_newctx },
@@ -262,12 +279,16 @@ static const OSSL_DISPATCH osrand_rand_functions[] = {
     { OSSL_FUNC_RAND_INSTANTIATE, (void (*)(void))osrand_instantiate },
     { OSSL_FUNC_RAND_UNINSTANTIATE, (void (*)(void))osrand_uninstantiate },
     { OSSL_FUNC_RAND_GENERATE, (void (*)(void))osrand_generate },
-    { OSSL_FUNC_RAND_RESEED, (void (*)(void))osrand_reseed},
+    { OSSL_FUNC_RAND_RESEED, (void (*)(void))osrand_reseed },
     { OSSL_FUNC_RAND_LOCK, (void (*)(void))osrand_lock },
     { OSSL_FUNC_RAND_ENABLE_LOCKING, (void (*)(void))osrand_enable_locking },
     { OSSL_FUNC_RAND_UNLOCK, (void (*)(void))osrand_unlock },
-    { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_params },
-    { OSSL_FUNC_RAND_SET_CTX_PARAMS, (void (*)(void))osrand_set_params },
+    { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_ctx_params },
+    { OSSL_FUNC_RAND_SET_CTX_PARAMS, (void (*)(void))osrand_set_ctx_params },
+    { OSSL_FUNC_RAND_GETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_gettable_ctx_params },
+    { OSSL_FUNC_RAND_SETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_settable_ctx_params },
     { 0, NULL }
 };
 
@@ -279,9 +300,8 @@ static const OSSL_ALGORITHM osrand_algs[] = {
 };
 
 /* Provider query */
-static const OSSL_ALGORITHM *osrand_query_operation(void *provctx,
-                                                    int operation_id,
-                                                    int *no_store)
+static const OSSL_ALGORITHM *
+osrand_query_operation(void *provctx, int operation_id, int *no_store)
 {
     switch (operation_id) {
     case OSSL_OP_RAND:
