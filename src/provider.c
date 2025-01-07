@@ -11,6 +11,10 @@
 #define PROVIDER_NAME "OSRand"
 #define PROVIDER_VERSION "0.1"
 
+#define RET_OSSL_OK 1
+#define RET_OSSL_ERR 0
+#define RET_OSSL_BAD -1
+
 /* Modes for selecting the source */
 typedef enum {
     OSRAND_MODE_GETRANDOM,
@@ -29,7 +33,7 @@ static int osrand_generate_from_device(const char *device_path,
 {
     int fd = open(device_path, O_RDONLY);
     if (fd == -1) {
-        return 0; /* Failed to open device - most likely because lrng is not available */
+        return RET_OSSL_ERR; /* Failed to open device */
     }
 
     ssize_t total_read = 0;
@@ -40,13 +44,13 @@ static int osrand_generate_from_device(const char *device_path,
                 continue; /* Retry on interrupt */
             }
             close(fd);
-            return 0; /* Read error */
+            return RET_OSSL_ERR; /* Read error */
         }
         total_read += ret;
     }
 
     close(fd);
-    return 1; /* Success */
+    return RET_OSSL_OK;
 }
 
 /* Generate random bytes using getrandom */
@@ -72,8 +76,16 @@ static int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
     case OSRAND_MODE_DEVRANDOM:
         return osrand_generate_from_device("/dev/random", buf, buflen);
     default:
-        return 0; /* Unknown mode */
+        return RET_OSSL_ERR; /* Unknown mode */
     }
+}
+
+/* RAND reseed function */
+static int osrand_reseed(void *pctx, int prediction_resistance,
+                               const unsigned char *entropy, size_t ent_len,
+                               const unsigned char *adin, size_t adin_len)
+{
+    return RET_OSSL_OK;
 }
 
 /* RAND new context */
@@ -90,6 +102,58 @@ static void osrand_freectx(void *vctx)
 {
     OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
     OPENSSL_free(ctx);
+}
+
+static int osrand_instantiate(void *pctx, unsigned int strength,
+                              int prediction_resistance,
+                              const unsigned char *pstr, size_t pstr_len,
+                              const OSSL_PARAM params[])
+{
+    return RET_OSSL_OK;
+}
+
+static int osrand_uninstantiate(void *pctx)
+{
+    return RET_OSSL_OK;
+}
+
+
+/* RAND set parameters */
+static int osrand_get_params(void *vctx, OSSL_PARAM params[])
+{
+    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    OSSL_PARAM *p;
+    int ret;
+
+    p = OSSL_PARAM_locate(params, "mode");
+    if (p != NULL) {
+        switch (ctx->mode) {
+            case OSRAND_MODE_GETRANDOM:
+                ret = OSSL_PARAM_set_utf8_string(p, "getrandom");
+                break;
+            case OSRAND_MODE_DEVLRNG:
+                ret = OSSL_PARAM_set_utf8_string(p, "devlrng");
+                break;
+            case OSRAND_MODE_DEVRANDOM:
+                ret = OSSL_PARAM_set_utf8_string(p, "devrandom");
+                break;
+            default:
+                ret = 0;
+        }
+        if (ret != RET_OSSL_OK) {
+            return ret;
+        }
+    }
+
+    p = OSSL_PARAM_locate(params, "max_request");
+    if (p != NULL) {
+        ret = OSSL_PARAM_set_size_t(p, INT_MAX);
+        if (ret != RET_OSSL_OK) {
+            return ret;
+        }
+    }
+
+    return RET_OSSL_OK;
 }
 
 /* RAND set parameters */
@@ -113,31 +177,61 @@ static int osrand_set_params(void *vctx, const OSSL_PARAM params[])
     return 1;
 }
 
+static int osrand_enable_locking(void *pctx)
+{
+    return RET_OSSL_OK;
+}
+
+static int osrand_lock(void *pctx)
+{
+    return RET_OSSL_OK;
+}
+
+static void osrand_unlock(void *pctx)
+{
+    /* nothing to do */
+}
+
+
 /* RAND methods */
 static const OSSL_DISPATCH osrand_rand_functions[] = {
     { OSSL_FUNC_RAND_NEWCTX, (void (*)(void))osrand_newctx },
     { OSSL_FUNC_RAND_FREECTX, (void (*)(void))osrand_freectx },
+    { OSSL_FUNC_RAND_INSTANTIATE, (void (*)(void))osrand_instantiate },
+    { OSSL_FUNC_RAND_UNINSTANTIATE, (void (*)(void))osrand_uninstantiate },
     { OSSL_FUNC_RAND_GENERATE, (void (*)(void))osrand_generate },
+    { OSSL_FUNC_RAND_RESEED, (void (*)(void))osrand_reseed},
+    { OSSL_FUNC_RAND_LOCK, (void (*)(void))osrand_lock },
+    { OSSL_FUNC_RAND_ENABLE_LOCKING, (void (*)(void))osrand_enable_locking },
+    { OSSL_FUNC_RAND_UNLOCK, (void (*)(void))osrand_unlock },
+    { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_params },
     { OSSL_FUNC_RAND_SET_CTX_PARAMS, (void (*)(void))osrand_set_params },
     { 0, NULL }
 };
 
-/* Provider initialization */
-static int osrand_provider_init(const OSSL_CORE_HANDLE *handle,
-                                const OSSL_DISPATCH *in,
-                                const OSSL_DISPATCH **out, void **provctx)
+static const OSSL_ALGORITHM osrand_algs[] = {
+    { "CTR-DRBG", "provider=osrand", osrand_rand_functions },
+    { "HASH-DRBG", "provider=osrand", osrand_rand_functions },
+    { "HMAC-DRBG", "provider=osrand", osrand_rand_functions },
+    { NULL, NULL, NULL }
+};
+
+/* Provider query */
+static const OSSL_ALGORITHM *osrand_query_operation(void *provctx,
+                                                    int operation_id,
+                                                    int *no_store)
 {
-    (void)handle;
-    (void)in;
-    *provctx = NULL;
-    *out = osrand_rand_functions;
-    return 1;
+    switch (operation_id) {
+    case OSSL_OP_RAND:
+        return osrand_algs;
+    }
+    return NULL;
 }
 
 /* Provider entry points */
 static const OSSL_DISPATCH osrand_provider_functions[] = {
     { OSSL_FUNC_PROVIDER_QUERY_OPERATION,
-      (void (*)(void))osrand_provider_init },
+      (void (*)(void))osrand_query_operation },
     { OSSL_FUNC_PROVIDER_TEARDOWN, (void (*)(void))NULL },
     { 0, NULL }
 };
