@@ -152,6 +152,7 @@ static void *osrand_newctx(void *provctx)
     OSRAND_CONTEXT *ctx = OPENSSL_malloc(sizeof(OSRAND_CONTEXT));
     if (ctx == NULL) return NULL;
     ctx->mode = OSRAND_MODE_GETRANDOM; /* Default to getrandom */
+    ctx->rd.fd = -1;
     return ctx;
 }
 
