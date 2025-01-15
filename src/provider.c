@@ -16,6 +16,15 @@
 #define RET_OSSL_ERR 0
 #define RET_OSSL_BAD -1
 
+#define OSRAND_E_DEVICE_OPEN_FAIL 1
+#define OSRAND_E_DEVICE_READ_FAIL 2
+#define OSRAND_E_GETRANDOM_FAIL 3
+
+static OSSL_FUNC_core_get_params_fn *core_get_params = NULL;
+static OSSL_FUNC_core_new_error_fn *core_new_error = NULL;
+static OSSL_FUNC_core_set_error_debug_fn *core_set_error_debug = NULL;
+static OSSL_FUNC_core_vset_error_fn *core_vset_error = NULL;
+
 /* Modes for selecting the source */
 typedef enum {
     OSRAND_MODE_GETRANDOM,
@@ -37,11 +46,41 @@ typedef struct {
     dev_t rdev;
 } OSRAND_RANDOM_DEVICE;
 
-/* Context structure */
+/* Provider context structure */
 typedef struct {
-    OSRAND_MODE mode; /* Current mode */
-    OSRAND_RANDOM_DEVICE rd; /* Random device if device used */
-} OSRAND_CONTEXT;
+    /* Current mode */
+    OSRAND_MODE mode;
+    /* Provider handles */
+    const OSSL_CORE_HANDLE *handle;
+} OSRAND_PROV_CTX;
+
+/* RAND context structure */
+typedef struct {
+    /* Provider context */
+    OSRAND_PROV_CTX *provctx;
+    /* Random device if device used */
+    OSRAND_RANDOM_DEVICE rd;
+} OSRAND_RAND_CTX;
+
+static void osrand_raise(OSRAND_PROV_CTX *ctx, const char *file, int line,
+                         const char *func, int errnum, const char *fmt, ...)
+{
+    va_list args;
+
+    if (!core_new_error || !core_vset_error) {
+        return;
+    }
+
+    va_start(args, fmt);
+    core_new_error(ctx->handle);
+    core_set_error_debug(ctx->handle, file, line, func);
+    core_vset_error(ctx->handle, errnum, fmt, args);
+    va_end(args);
+}
+
+#define OSRAND_raise(ctx, errnum, format, ...) \
+    osrand_raise((ctx), OPENSSL_FILE, OPENSSL_LINE, OPENSSL_FUNC, (errnum), \
+                 format, ##__VA_ARGS__)
 
 /* Check whether random device fd is still open and device is valid */
 static int osrand_check_random_device(OSRAND_RANDOM_DEVICE *rd)
@@ -88,12 +127,14 @@ static void osrand_close_random_device(OSRAND_RANDOM_DEVICE *rd)
 }
 
 /* Generate random bytes using a device file */
-static int osrand_generate_from_device(OSRAND_CONTEXT *ctx,
+static int osrand_generate_from_device(OSRAND_RAND_CTX *ctx,
                                        const char *device_path,
                                        unsigned char *buf, size_t buflen)
 {
     int fd = osrand_get_random_device(&ctx->rd, device_path);
     if (fd == -1) {
+        OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_OPEN_FAIL,
+                     "Failed to open device %s", device_path);
         return RET_OSSL_ERR; /* Failed to retrieving the device */
     }
 
@@ -104,6 +145,8 @@ static int osrand_generate_from_device(OSRAND_CONTEXT *ctx,
             if (ret == -1 && errno == EINTR) {
                 continue; /* Retry on interrupt */
             }
+            OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+                         "Failed to to read from device %s", device_path);
             return RET_OSSL_ERR; /* Read error */
         }
         total_read += ret;
@@ -113,23 +156,30 @@ static int osrand_generate_from_device(OSRAND_CONTEXT *ctx,
 }
 
 /* Generate random bytes using getrandom */
-static int osrand_generate_using_getrandom(unsigned char *buf, size_t buflen)
+static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
+                                           unsigned char *buf, size_t buflen)
 {
     ssize_t ret = getrandom(buf, buflen, 0);
-    return (ret == -1 || (size_t)ret != buflen) ? 0 : 1;
+    if (ret == -1) {
+        OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+                     "Failed to get %zu bytes using getrandom", buflen);
+        return 0;
+    }
+
+    return ((size_t)ret != buflen) ? 0 : 1;
 }
 
 /* RAND generate function */
 static int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
                            unsigned int strength, int prediction_resistance)
 {
-    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     (void)strength;
     (void)prediction_resistance;
 
-    switch (ctx->mode) {
+    switch (ctx->provctx->mode) {
     case OSRAND_MODE_GETRANDOM:
-        return osrand_generate_using_getrandom(buf, buflen);
+        return osrand_generate_using_getrandom(ctx, buf, buflen);
     case OSRAND_MODE_DEVLRNG:
         return osrand_generate_from_device(ctx, "/dev/lrng", buf, buflen);
     case OSRAND_MODE_DEVRANDOM:
@@ -150,17 +200,17 @@ static int osrand_reseed(void *pctx, int prediction_resistance,
 /* RAND new context */
 static void *osrand_newctx(void *provctx)
 {
-    OSRAND_CONTEXT *ctx = OPENSSL_malloc(sizeof(OSRAND_CONTEXT));
+    OSRAND_RAND_CTX *ctx = OPENSSL_malloc(sizeof(OSRAND_RAND_CTX));
     if (ctx == NULL) return NULL;
-    ctx->mode = OSRAND_MODE_GETRANDOM; /* Default to getrandom */
     ctx->rd.fd = -1;
+    ctx->provctx = provctx;
     return ctx;
 }
 
 /* RAND free context */
 static void osrand_freectx(void *vctx)
 {
-    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     osrand_close_random_device(&ctx->rd);
     OPENSSL_free(ctx);
 }
@@ -175,7 +225,7 @@ static int osrand_instantiate(void *vctx, unsigned int strength,
 
 static int osrand_uninstantiate(void *vctx)
 {
-    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     osrand_close_random_device(&ctx->rd);
     return RET_OSSL_OK;
 }
@@ -183,29 +233,8 @@ static int osrand_uninstantiate(void *vctx)
 /* RAND set parameters */
 static int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
 {
-    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
     OSSL_PARAM *p;
     int ret;
-
-    p = OSSL_PARAM_locate(params, OSRAND_PARAM_MODE);
-    if (p != NULL) {
-        switch (ctx->mode) {
-        case OSRAND_MODE_GETRANDOM:
-            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_GETRANDOM_NAME);
-            break;
-        case OSRAND_MODE_DEVLRNG:
-            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_DEVLRNG_NAME);
-            break;
-        case OSRAND_MODE_DEVRANDOM:
-            ret = OSSL_PARAM_set_utf8_string(p, OSRAND_MODE_DEVRANDOM_NAME);
-            break;
-        default:
-            ret = 0;
-        }
-        if (ret != RET_OSSL_OK) {
-            return ret;
-        }
-    }
 
     p = OSSL_PARAM_locate(params, "max_request");
     if (p != NULL) {
@@ -218,31 +247,9 @@ static int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
     return RET_OSSL_OK;
 }
 
-/* RAND set parameters */
-static int osrand_set_ctx_params(void *vctx, const OSSL_PARAM params[])
-{
-    OSRAND_CONTEXT *ctx = (OSRAND_CONTEXT *)vctx;
-    const OSSL_PARAM *p;
-
-    p = OSSL_PARAM_locate_const(params, OSRAND_PARAM_MODE);
-    if (p != NULL && p->data_type == OSSL_PARAM_UTF8_STRING) {
-        if (strcmp(p->data, OSRAND_MODE_GETRANDOM_NAME) == 0) {
-            ctx->mode = OSRAND_MODE_GETRANDOM;
-        } else if (strcmp(p->data, OSRAND_MODE_DEVLRNG_NAME) == 0) {
-            ctx->mode = OSRAND_MODE_DEVLRNG;
-        } else if (strcmp(p->data, OSRAND_MODE_DEVRANDOM_NAME) == 0) {
-            ctx->mode = OSRAND_MODE_DEVRANDOM;
-        } else {
-            return 0; /* Invalid mode */
-        }
-    }
-    return 1;
-}
-
 static const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
 {
     static const OSSL_PARAM params[] = {
-        OSSL_PARAM_utf8_string(OSRAND_PARAM_MODE, NULL, 0),
         OSSL_PARAM_END,
     };
     return params;
@@ -251,7 +258,6 @@ static const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
 static const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov)
 {
     static const OSSL_PARAM params[] = {
-        OSSL_PARAM_utf8_string(OSRAND_PARAM_MODE, NULL, 0),
         OSSL_PARAM_END,
     };
     return params;
@@ -284,7 +290,6 @@ static const OSSL_DISPATCH osrand_rand_functions[] = {
     { OSSL_FUNC_RAND_ENABLE_LOCKING, (void (*)(void))osrand_enable_locking },
     { OSSL_FUNC_RAND_UNLOCK, (void (*)(void))osrand_unlock },
     { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_ctx_params },
-    { OSSL_FUNC_RAND_SET_CTX_PARAMS, (void (*)(void))osrand_set_ctx_params },
     { OSSL_FUNC_RAND_GETTABLE_CTX_PARAMS,
       (void (*)(void))osrand_gettable_ctx_params },
     { OSSL_FUNC_RAND_SETTABLE_CTX_PARAMS,
@@ -318,10 +323,74 @@ static const OSSL_DISPATCH osrand_provider_functions[] = {
     { 0, NULL }
 };
 
+static void osrand_get_core_dispatch_funcs(const OSSL_DISPATCH *in)
+{
+    const OSSL_DISPATCH *iter_in;
+
+    for (iter_in = in; iter_in->function_id != 0; iter_in++) {
+        switch (iter_in->function_id) {
+        case OSSL_FUNC_CORE_GET_PARAMS:
+            core_get_params = OSSL_FUNC_core_get_params(iter_in);
+            break;
+        case OSSL_FUNC_CORE_NEW_ERROR:
+            core_new_error = OSSL_FUNC_core_new_error(iter_in);
+            break;
+        case OSSL_FUNC_CORE_SET_ERROR_DEBUG:
+            core_set_error_debug = OSSL_FUNC_core_set_error_debug(iter_in);
+            break;
+        case OSSL_FUNC_CORE_VSET_ERROR:
+            core_vset_error = OSSL_FUNC_core_vset_error(iter_in);
+            break;
+        default:
+            /* Ignore anything that is not used. */
+            continue;
+        }
+    }
+}
+
+/* Set mode */
+static int osrand_set_mode(OSRAND_PROV_CTX *ctx, const char *mode)
+{
+    if (mode != NULL) {
+        if (strcmp(mode, OSRAND_MODE_GETRANDOM_NAME) == 0) {
+            ctx->mode = OSRAND_MODE_GETRANDOM;
+        } else if (strcmp(mode, OSRAND_MODE_DEVLRNG_NAME) == 0) {
+            ctx->mode = OSRAND_MODE_DEVLRNG;
+        } else if (strcmp(mode, OSRAND_MODE_DEVRANDOM_NAME) == 0) {
+            ctx->mode = OSRAND_MODE_DEVRANDOM;
+        } else {
+            ctx->mode = OSRAND_MODE_GETRANDOM;
+        }
+    } else {
+        ctx->mode = OSRAND_MODE_GETRANDOM;
+    }
+    return 1;
+}
+
 int OSSL_provider_init(const OSSL_CORE_HANDLE *handle, const OSSL_DISPATCH *in,
                        const OSSL_DISPATCH **out, void **provctx)
 {
-    *out = osrand_provider_functions;
     *provctx = NULL;
+
+    osrand_get_core_dispatch_funcs(in);
+
+    // Get provider params
+    char *mode = NULL;
+    OSSL_PARAM core_params[] = {
+        OSSL_PARAM_construct_utf8_ptr(OSRAND_PARAM_MODE, &mode, sizeof(void *)),
+        OSSL_PARAM_END,
+    };
+    core_get_params(handle, core_params);
+
+    // Create provider context
+    OSRAND_PROV_CTX *ctx = OPENSSL_zalloc(sizeof(OSRAND_PROV_CTX));
+    if (ctx == NULL) {
+        return RET_OSSL_ERR;
+    }
+    ctx->handle = handle;
+    osrand_set_mode(ctx, mode);
+
+    *provctx = ctx;
+    *out = osrand_provider_functions;
     return 1;
 }
