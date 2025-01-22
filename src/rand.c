@@ -1,0 +1,230 @@
+/* Copyright (C) 2022 Simo Sorce <simo@redhat.com>
+   Copyright (C) 2025 Jakub Zelenka <simo@redhat.com>
+   SPDX-License-Identifier: Apache-2.0 */
+
+
+#include "rand.h"
+
+#include <sys/random.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <openssl/core.h>
+#include <openssl/core_dispatch.h>
+
+/* Check whether random device fd is still open and device is valid */
+static int osrand_check_random_device(OSRAND_RANDOM_DEVICE *rd)
+{
+    struct stat st;
+
+    return rd->fd != -1 && fstat(rd->fd, &st) != -1 && rd->dev == st.st_dev
+           && rd->ino == st.st_ino
+           && ((rd->mode ^ st.st_mode) & ~(S_IRWXU | S_IRWXG | S_IRWXO)) == 0
+           && rd->rdev == st.st_rdev;
+}
+
+/* Open a random device if required and return its file descriptor */
+static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
+                                    const char *device_path)
+{
+    struct stat st;
+
+    /* reuse existing file descriptor if it is (still) valid */
+    if (osrand_check_random_device(rd)) return rd->fd;
+
+    /* open the random device ... */
+    if ((rd->fd = open(device_path, O_RDONLY)) == -1) return rd->fd;
+
+    /* ... and cache its relevant stat(2) data */
+    if (fstat(rd->fd, &st) != -1) {
+        rd->dev = st.st_dev;
+        rd->ino = st.st_ino;
+        rd->mode = st.st_mode;
+        rd->rdev = st.st_rdev;
+    } else {
+        close(rd->fd);
+        rd->fd = -1;
+    }
+
+    return rd->fd;
+}
+
+/* Close a random device making sure it is a random device */
+static void osrand_close_random_device(OSRAND_RANDOM_DEVICE *rd)
+{
+    if (osrand_check_random_device(rd)) close(rd->fd);
+    rd->fd = -1;
+}
+
+/* Generate random bytes using a device file */
+static int osrand_generate_from_device(OSRAND_RAND_CTX *ctx,
+                                       const char *device_path,
+                                       unsigned char *buf, size_t buflen)
+{
+    int fd = osrand_get_random_device(&ctx->rd, device_path);
+    if (fd == -1) {
+        OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_OPEN_FAIL,
+                     "Failed to open device %s", device_path);
+        return RET_OSSL_ERR; /* Failed to retrieving the device */
+    }
+
+    ssize_t total_read = 0;
+    while (total_read < (ssize_t)buflen) {
+        ssize_t ret = read(fd, buf + total_read, buflen - total_read);
+        if (ret <= 0) {
+            if (ret == -1 && errno == EINTR) {
+                continue; /* Retry on interrupt */
+            }
+            OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+                         "Failed to to read from device %s", device_path);
+            return RET_OSSL_ERR; /* Read error */
+        }
+        total_read += ret;
+    }
+
+    return RET_OSSL_OK;
+}
+
+/* Generate random bytes using getrandom */
+static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
+                                           unsigned char *buf, size_t buflen)
+{
+    ssize_t ret = getrandom(buf, buflen, 0);
+    if (ret == -1) {
+        OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+                     "Failed to get %zu bytes using getrandom", buflen);
+        return 0;
+    }
+
+    return ((size_t)ret != buflen) ? 0 : 1;
+}
+
+/* RAND generate function */
+static int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
+                           unsigned int strength, int prediction_resistance)
+{
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
+    (void)strength;
+    (void)prediction_resistance;
+
+    switch (ctx->provctx->mode) {
+    case OSRAND_MODE_GETRANDOM:
+        return osrand_generate_using_getrandom(ctx, buf, buflen);
+    case OSRAND_MODE_DEVLRNG:
+        return osrand_generate_from_device(ctx, "/dev/lrng", buf, buflen);
+    case OSRAND_MODE_DEVRANDOM:
+        return osrand_generate_from_device(ctx, "/dev/random", buf, buflen);
+    default:
+        return RET_OSSL_ERR; /* Unknown mode */
+    }
+}
+
+/* RAND reseed function */
+static int osrand_reseed(void *pctx, int prediction_resistance,
+                         const unsigned char *entropy, size_t ent_len,
+                         const unsigned char *adin, size_t adin_len)
+{
+    return RET_OSSL_OK;
+}
+
+/* RAND new context */
+static void *osrand_newctx(void *provctx)
+{
+    OSRAND_RAND_CTX *ctx = OPENSSL_malloc(sizeof(OSRAND_RAND_CTX));
+    if (ctx == NULL) return NULL;
+    ctx->rd.fd = -1;
+    ctx->provctx = provctx;
+    return ctx;
+}
+
+/* RAND free context */
+static void osrand_freectx(void *vctx)
+{
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
+    osrand_close_random_device(&ctx->rd);
+    OPENSSL_free(ctx);
+}
+
+static int osrand_instantiate(void *vctx, unsigned int strength,
+                              int prediction_resistance,
+                              const unsigned char *pstr, size_t pstr_len,
+                              const OSSL_PARAM params[])
+{
+    return RET_OSSL_OK;
+}
+
+static int osrand_uninstantiate(void *vctx)
+{
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
+    osrand_close_random_device(&ctx->rd);
+    return RET_OSSL_OK;
+}
+
+/* RAND set parameters */
+static int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
+{
+    OSSL_PARAM *p;
+    int ret;
+
+    p = OSSL_PARAM_locate(params, "max_request");
+    if (p != NULL) {
+        ret = OSSL_PARAM_set_size_t(p, INT_MAX);
+        if (ret != RET_OSSL_OK) {
+            return ret;
+        }
+    }
+
+    return RET_OSSL_OK;
+}
+
+static const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
+{
+    static const OSSL_PARAM params[] = {
+        OSSL_PARAM_END,
+    };
+    return params;
+}
+
+static const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov)
+{
+    static const OSSL_PARAM params[] = {
+        OSSL_PARAM_END,
+    };
+    return params;
+}
+
+static int osrand_enable_locking(void *pctx)
+{
+    return RET_OSSL_OK;
+}
+
+static int osrand_lock(void *pctx)
+{
+    return RET_OSSL_OK;
+}
+
+static void osrand_unlock(void *pctx)
+{
+    /* nothing to do */
+}
+
+/* RAND methods */
+const OSSL_DISPATCH osrand_rand_functions[] = {
+    { OSSL_FUNC_RAND_NEWCTX, (void (*)(void))osrand_newctx },
+    { OSSL_FUNC_RAND_FREECTX, (void (*)(void))osrand_freectx },
+    { OSSL_FUNC_RAND_INSTANTIATE, (void (*)(void))osrand_instantiate },
+    { OSSL_FUNC_RAND_UNINSTANTIATE, (void (*)(void))osrand_uninstantiate },
+    { OSSL_FUNC_RAND_GENERATE, (void (*)(void))osrand_generate },
+    { OSSL_FUNC_RAND_RESEED, (void (*)(void))osrand_reseed },
+    { OSSL_FUNC_RAND_LOCK, (void (*)(void))osrand_lock },
+    { OSSL_FUNC_RAND_ENABLE_LOCKING, (void (*)(void))osrand_enable_locking },
+    { OSSL_FUNC_RAND_UNLOCK, (void (*)(void))osrand_unlock },
+    { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_ctx_params },
+    { OSSL_FUNC_RAND_GETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_gettable_ctx_params },
+    { OSSL_FUNC_RAND_SETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_settable_ctx_params },
+    { 0, NULL }
+};

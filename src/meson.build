@@ -1,5 +1,7 @@
 osrand_provider_sources = [
+  'debug.c',
   'provider.c',
+  'rand.c',
 ]
 
 osrand_provider_map = meson.current_source_dir() / 'provider.map'
