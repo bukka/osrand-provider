@@ -14,6 +14,7 @@ activate = 1
 [osrand_sect]
 module = __OPENSSL_DIR__/osrand.so
 activate = 1
+#osrand-mode = devrandom
 
 [random_sect]
 random = OS-DRBG
