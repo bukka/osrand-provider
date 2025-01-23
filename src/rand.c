@@ -2,7 +2,6 @@
    Copyright (C) 2025 Jakub Zelenka <simo@redhat.com>
    SPDX-License-Identifier: Apache-2.0 */
 
-
 #include "rand.h"
 
 #include <sys/random.h>
@@ -35,7 +34,7 @@ static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
     if (osrand_check_random_device(rd)) return rd->fd;
 
     /* open the random device ... */
-    if ((rd->fd = open(device_path, O_RDONLY)) == -1) return rd->fd;
+    if ((rd->fd = open(device_path, O_RDONLY)) == -1) return -1;
 
     /* ... and cache its relevant stat(2) data */
     if (fstat(rd->fd, &st) != -1) {
@@ -43,7 +42,9 @@ static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
         rd->ino = st.st_ino;
         rd->mode = st.st_mode;
         rd->rdev = st.st_rdev;
+        OSRAND_debug("Opened random device fd %d", rd->fd);
     } else {
+        OSRAND_debug("New random device fd %d stat failed", rd->fd);
         close(rd->fd);
         rd->fd = -1;
     }
@@ -54,7 +55,10 @@ static int osrand_get_random_device(OSRAND_RANDOM_DEVICE *rd,
 /* Close a random device making sure it is a random device */
 static void osrand_close_random_device(OSRAND_RANDOM_DEVICE *rd)
 {
-    if (osrand_check_random_device(rd)) close(rd->fd);
+    if (osrand_check_random_device(rd)) {
+        OSRAND_debug("Closing random device fd %d", rd->fd);
+        close(rd->fd);
+    }
     rd->fd = -1;
 }
 
@@ -84,6 +88,8 @@ static int osrand_generate_from_device(OSRAND_RAND_CTX *ctx,
         total_read += ret;
     }
 
+    OSRAND_debug("Generated %zd bytes from %s device", total_read, device_path);
+
     return RET_OSSL_OK;
 }
 
@@ -92,11 +98,20 @@ static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
                                            unsigned char *buf, size_t buflen)
 {
     ssize_t ret = getrandom(buf, buflen, 0);
-    if (ret == -1) {
+    if (ret < 0) {
         OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
-                     "Failed to get %zu bytes using getrandom", buflen);
+                     "Failed to get %zu bytes using getrandom due error",
+                     buflen);
+        return 0;
+    } else if ((size_t)ret != buflen) {
+        OSRAND_raise(
+            ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+            "Failed to get %zu bytes using getrandom, only %zd received",
+            buflen, ret);
         return 0;
     }
+
+    OSRAND_debug("Generated %zu bytes using getrandom", buflen);
 
     return ((size_t)ret != buflen) ? 0 : 1;
 }
@@ -136,6 +151,9 @@ static void *osrand_newctx(void *provctx)
     if (ctx == NULL) return NULL;
     ctx->rd.fd = -1;
     ctx->provctx = provctx;
+
+    OSRAND_debug("Creating new RAND context");
+
     return ctx;
 }
 
@@ -143,7 +161,10 @@ static void *osrand_newctx(void *provctx)
 static void osrand_freectx(void *vctx)
 {
     OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
+
     osrand_close_random_device(&ctx->rd);
+
+    OSRAND_debug("Freeing RAND context");
     OPENSSL_free(ctx);
 }
 

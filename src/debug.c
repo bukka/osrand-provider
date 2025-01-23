@@ -13,11 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-int debug_level = -1;
+int osrand_debug_level = -1;
 FILE *stddebug = NULL;
 
 /* this function relies on being called by OSRAND_debug, after
- * an __atomic_compare_exchange_n sets debug_level to -1,
+ * an __atomic_compare_exchange_n sets osrand_debug_level to -1,
  * This allows only 1 thread to ever init, as any other thread
  * would see debugging as disabled. This means some debugging may
  * be lost but will not risk multiplt thread stopming on each
@@ -67,12 +67,12 @@ void osrand_debug_init(void)
     }
 
 done:
-    /* set value to debug_level atomically */
-    __atomic_exchange(&debug_level, &dbg_level, &orig, __ATOMIC_SEQ_CST);
+    /* set value to osrand_debug_level atomically */
+    __atomic_exchange(&osrand_debug_level, &dbg_level, &orig, __ATOMIC_SEQ_CST);
 }
 
-void osrand_debug(const char *file, int line, const char *func,
-                   const char *fmt, ...)
+void osrand_debug(const char *file, int line, const char *func, const char *fmt,
+                  ...)
 {
     const char newline[] = "\n";
     va_list args;

@@ -42,10 +42,10 @@ typedef struct {
 
 #define OSRAND_raise(ctx, errnum, format, ...) \
     do { \
-        osrand_raise((ctx), OPENSSL_FILE, OPENSSL_LINE, OPENSSL_FUNC, (errnum), \
-                    format, ##__VA_ARGS__); \
+        osrand_raise((ctx), OPENSSL_FILE, OPENSSL_LINE, OPENSSL_FUNC, \
+                     (errnum), format, ##__VA_ARGS__); \
         OSRAND_debug("Error: " format, ##__VA_ARGS__); \
-    } while(0)
+    } while (0)
 
 void osrand_raise(OSRAND_PROV_CTX *ctx, const char *file, int line,
                   const char *func, int errnum, const char *fmt, ...);

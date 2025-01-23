@@ -22,5 +22,11 @@ echo "Using OPENSSL_CONF=$OPENSSL_CONF"
 
 export LD_LIBRARY_PATH=$OPENSSL_DIR/lib64
 
+# enable logs
+osr_log_file="$osr_example_dir/test.log"
+rm -f $osr_log_file
+echo "Using OSRAND_PROVIDER_DEBUG=file:$osr_log_file,level:6"
+export OSRAND_PROVIDER_DEBUG="file:$osr_log_file,level:6"
+
 echo $OPENSSL_DIR/bin/openssl rand -hex 16
-$OPENSSL_DIR/bin/openssl rand -provider osrand -hex 16
+$OPENSSL_DIR/bin/openssl rand -hex 16

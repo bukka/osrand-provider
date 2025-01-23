@@ -10,15 +10,13 @@
 #include <openssl/rand.h>
 #include <string.h>
 
-
 static OSSL_FUNC_core_get_params_fn *core_get_params = NULL;
 static OSSL_FUNC_core_new_error_fn *core_new_error = NULL;
 static OSSL_FUNC_core_set_error_debug_fn *core_set_error_debug = NULL;
 static OSSL_FUNC_core_vset_error_fn *core_vset_error = NULL;
 
-
 void osrand_raise(OSRAND_PROV_CTX *ctx, const char *file, int line,
-                         const char *func, int errnum, const char *fmt, ...)
+                  const char *func, int errnum, const char *fmt, ...)
 {
     va_list args;
 
@@ -89,15 +87,20 @@ static int osrand_set_mode(OSRAND_PROV_CTX *ctx, const char *mode)
 {
     if (mode != NULL) {
         if (strcmp(mode, OSRAND_MODE_GETRANDOM_NAME) == 0) {
+            OSRAND_debug("Setting getrandom mode");
             ctx->mode = OSRAND_MODE_GETRANDOM;
         } else if (strcmp(mode, OSRAND_MODE_DEVLRNG_NAME) == 0) {
+            OSRAND_debug("Setting devlrng mode");
             ctx->mode = OSRAND_MODE_DEVLRNG;
         } else if (strcmp(mode, OSRAND_MODE_DEVRANDOM_NAME) == 0) {
+            OSRAND_debug("Setting devrandom mode");
             ctx->mode = OSRAND_MODE_DEVRANDOM;
         } else {
+            OSRAND_debug("Setting getrandom mode as %s mode is unknown", mode);
             ctx->mode = OSRAND_MODE_GETRANDOM;
         }
     } else {
+        OSRAND_debug("Setting getrandom mode as no mode specified");
         ctx->mode = OSRAND_MODE_GETRANDOM;
     }
     return 1;
@@ -123,6 +126,8 @@ int OSSL_provider_init(const OSSL_CORE_HANDLE *handle, const OSSL_DISPATCH *in,
     if (ctx == NULL) {
         return RET_OSSL_ERR;
     }
+    OSRAND_debug("Initilazing OSRand provider");
+
     ctx->handle = handle;
     osrand_set_mode(ctx, mode);
 
