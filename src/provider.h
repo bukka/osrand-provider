@@ -5,6 +5,9 @@
 #define _PROVIDER_H
 
 #include <openssl/core.h>
+#include <openssl/crypto.h>
+#include <openssl/params.h>
+#include <sys/types.h>
 
 #define PROVIDER_NAME "OSRand"
 #define PROVIDER_VERSION "0.1"
