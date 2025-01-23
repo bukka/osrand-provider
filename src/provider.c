@@ -31,10 +31,27 @@ void osrand_raise(OSRAND_PROV_CTX *ctx, const char *file, int line,
     va_end(args);
 }
 
+/* RAND methods */
+const OSSL_DISPATCH osrand_rand_functions[] = {
+    { OSSL_FUNC_RAND_NEWCTX, (void (*)(void))osrand_newctx },
+    { OSSL_FUNC_RAND_FREECTX, (void (*)(void))osrand_freectx },
+    { OSSL_FUNC_RAND_INSTANTIATE, (void (*)(void))osrand_instantiate },
+    { OSSL_FUNC_RAND_UNINSTANTIATE, (void (*)(void))osrand_uninstantiate },
+    { OSSL_FUNC_RAND_GENERATE, (void (*)(void))osrand_generate },
+    { OSSL_FUNC_RAND_RESEED, (void (*)(void))osrand_reseed },
+    { OSSL_FUNC_RAND_LOCK, (void (*)(void))osrand_lock },
+    { OSSL_FUNC_RAND_ENABLE_LOCKING, (void (*)(void))osrand_enable_locking },
+    { OSSL_FUNC_RAND_UNLOCK, (void (*)(void))osrand_unlock },
+    { OSSL_FUNC_RAND_GET_CTX_PARAMS, (void (*)(void))osrand_get_ctx_params },
+    { OSSL_FUNC_RAND_GETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_gettable_ctx_params },
+    { OSSL_FUNC_RAND_SETTABLE_CTX_PARAMS,
+      (void (*)(void))osrand_settable_ctx_params },
+    { 0, NULL }
+};
+
 static const OSSL_ALGORITHM osrand_algs[] = {
-    { "CTR-DRBG", "provider=osrand", osrand_rand_functions },
-    { "HASH-DRBG", "provider=osrand", osrand_rand_functions },
-    { "HMAC-DRBG", "provider=osrand", osrand_rand_functions },
+    { "OS-DRBG", "provider=osrand", osrand_rand_functions },
     { NULL, NULL, NULL }
 };
 

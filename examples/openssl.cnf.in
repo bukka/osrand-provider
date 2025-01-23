@@ -2,6 +2,7 @@ openssl_conf = openssl_init
 
 [openssl_init]
 providers = provider_sect
+random = random_sect
 
 [provider_sect]
 default = default_sect
@@ -13,3 +14,6 @@ activate = 1
 [osrand_sect]
 module = __OPENSSL_DIR__/osrand.so
 activate = 1
+
+[random_sect]
+random = OS-DRBG
