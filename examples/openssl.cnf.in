@@ -12,7 +12,7 @@ osrand = osrand_sect
 activate = 1
 
 [osrand_sect]
-module = __OPENSSL_DIR__/osrand.so
+module = __OPENSSL_MODULES_DIR__/osrand.so
 activate = 1
 #osrand-mode = devrandom
 
