@@ -1,5 +1,4 @@
-/* Copyright (C) 2022 Simo Sorce <simo@redhat.com>
-   Copyright (C) 2025 Jakub Zelenka <simo@redhat.com>
+/* Copyright (C) 2025 Jakub Zelenka <jakub.openssl@gmail.com>
    SPDX-License-Identifier: Apache-2.0 */
 
 #ifndef _RAND_H
