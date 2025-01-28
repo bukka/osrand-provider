@@ -1,0 +1,20 @@
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+random = random_sect
+
+[provider_sect]
+default = default_sect
+osrand = osrand_sect
+
+[default_sect]
+activate = 1
+
+[osrand_sect]
+module = __OPENSSL_MODULES_DIR__/osrand.__SHARED_EXT__
+activate = 1
+osrand-mode = __OSRAND_MODE__
+
+[random_sect]
+random = OS-DRBG
