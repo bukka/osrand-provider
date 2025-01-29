@@ -63,3 +63,4 @@ endif
 configure_file(output: 'config.h', configuration: conf)
 
 subdir('src')
+subdir('tests')

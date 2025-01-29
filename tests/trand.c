@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <openssl/rand.h>
 
-int main() {
+int main(void)
+{
     unsigned char buffer[16];
 
     // Generate random bytes (first call)
