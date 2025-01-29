@@ -21,3 +21,8 @@ dist:
 
 format:
 	find src -name '*.c' -or -name '*.h' | xargs clang-format -i
+	find tests -name '*.c' -or -name '*.h' | xargs clang-format -i
+
+format-check:
+	find src -name '*.c' -or -name '*.h' | xargs clang-format --dry-run --Werror
+	find tests -name '*.c' -or -name '*.h' | xargs clang-format --dry-run --Werror

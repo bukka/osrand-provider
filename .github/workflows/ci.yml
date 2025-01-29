@@ -1,0 +1,33 @@
+name: CI for OSRand provider
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -q update
+          sudo apt-get install -yq git make clang meson pkg-config libssl-dev
+      
+      - name: Check formatting
+        run: make format-check
+
+      - name: Build
+        run: |
+          meson setup builddir
+          meson compile -C builddir
+
+      - name: Run tests
+        run: meson test -C builddir
