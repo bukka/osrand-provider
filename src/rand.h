@@ -23,16 +23,15 @@ typedef struct {
 } OSRAND_RAND_CTX;
 
 int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
-                           unsigned int strength, int prediction_resistance);
+                    unsigned int strength, int prediction_resistance);
 int osrand_reseed(void *pctx, int prediction_resistance,
-                         const unsigned char *entropy, size_t ent_len,
-                         const unsigned char *adin, size_t adin_len);
+                  const unsigned char *entropy, size_t ent_len,
+                  const unsigned char *adin, size_t adin_len);
 void *osrand_newctx(void *provctx);
 void osrand_freectx(void *vctx);
 int osrand_instantiate(void *vctx, unsigned int strength,
-                              int prediction_resistance,
-                              const unsigned char *pstr, size_t pstr_len,
-                              const OSSL_PARAM params[]);
+                       int prediction_resistance, const unsigned char *pstr,
+                       size_t pstr_len, const OSSL_PARAM params[]);
 int osrand_uninstantiate(void *vctx);
 int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[]);
 const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov);
@@ -40,7 +39,5 @@ const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov);
 int osrand_enable_locking(void *pctx);
 int osrand_lock(void *pctx);
 void osrand_unlock(void *pctx);
-
-
 
 #endif /* _RAND_H */

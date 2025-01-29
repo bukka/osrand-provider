@@ -50,10 +50,9 @@ const OSSL_DISPATCH osrand_rand_functions[] = {
     { 0, NULL }
 };
 
-static const OSSL_ALGORITHM osrand_algs[] = {
-    { "OS-DRBG", "provider=osrand", osrand_rand_functions },
-    { NULL, NULL, NULL }
-};
+static const OSSL_ALGORITHM osrand_algs[] = { { "OS-DRBG", "provider=osrand",
+                                                osrand_rand_functions },
+                                              { NULL, NULL, NULL } };
 
 /* Provider query */
 static const OSSL_ALGORITHM *

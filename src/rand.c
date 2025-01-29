@@ -117,7 +117,7 @@ static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
 
 /* RAND generate function */
 int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
-                           unsigned int strength, int prediction_resistance)
+                    unsigned int strength, int prediction_resistance)
 {
     OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     (void)strength;
@@ -137,8 +137,8 @@ int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
 
 /* RAND reseed function */
 int osrand_reseed(void *pctx, int prediction_resistance,
-                         const unsigned char *entropy, size_t ent_len,
-                         const unsigned char *adin, size_t adin_len)
+                  const unsigned char *entropy, size_t ent_len,
+                  const unsigned char *adin, size_t adin_len)
 {
     return RET_OSSL_OK;
 }
@@ -168,9 +168,8 @@ void osrand_freectx(void *vctx)
 }
 
 int osrand_instantiate(void *vctx, unsigned int strength,
-                              int prediction_resistance,
-                              const unsigned char *pstr, size_t pstr_len,
-                              const OSSL_PARAM params[])
+                       int prediction_resistance, const unsigned char *pstr,
+                       size_t pstr_len, const OSSL_PARAM params[])
 {
     return RET_OSSL_OK;
 }
@@ -229,5 +228,3 @@ void osrand_unlock(void *pctx)
 {
     /* nothing to do */
 }
-
-
