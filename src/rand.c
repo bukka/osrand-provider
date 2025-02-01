@@ -11,6 +11,8 @@
 #include <errno.h>
 #include <openssl/core.h>
 #include <openssl/core_dispatch.h>
+#include <openssl/core_names.h>
+#include <openssl/evp.h>
 
 /* Check whether random device fd is still open and device is valid */
 static int osrand_check_random_device(OSRAND_RANDOM_DEVICE *rd)
@@ -150,6 +152,7 @@ void *osrand_newctx(void *provctx)
     if (ctx == NULL) return NULL;
     ctx->rd.fd = -1;
     ctx->provctx = provctx;
+    ctx->state = EVP_RAND_STATE_UNINITIALISED;
 
     OSRAND_debug("Creating new RAND context");
 
@@ -171,6 +174,8 @@ int osrand_instantiate(void *vctx, unsigned int strength,
                        int prediction_resistance, const unsigned char *pstr,
                        size_t pstr_len, const OSSL_PARAM params[])
 {
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
+    ctx->state = EVP_RAND_STATE_READY;
     return RET_OSSL_OK;
 }
 
@@ -178,6 +183,7 @@ int osrand_uninstantiate(void *vctx)
 {
     OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     osrand_close_random_device(&ctx->rd);
+    ctx->state = EVP_RAND_STATE_UNINITIALISED;
     return RET_OSSL_OK;
 }
 
@@ -185,9 +191,18 @@ int osrand_uninstantiate(void *vctx)
 int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
 {
     OSSL_PARAM *p;
+    OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     int ret;
 
-    p = OSSL_PARAM_locate(params, "max_request");
+    p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_STATE);
+    if (p != NULL && !OSSL_PARAM_set_int(p, ctx->state))
+        return 0;
+
+    p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_STRENGTH);
+    if (p != NULL && !OSSL_PARAM_set_uint(p, 256))
+        return 0;
+
+    p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_MAX_REQUEST);
     if (p != NULL) {
         ret = OSSL_PARAM_set_size_t(p, INT_MAX);
         if (ret != RET_OSSL_OK) {
@@ -201,6 +216,9 @@ int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
 const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
 {
     static const OSSL_PARAM params[] = {
+	OSSL_PARAM_int(OSSL_RAND_PARAM_STATE, NULL),
+	OSSL_PARAM_uint(OSSL_RAND_PARAM_STRENGTH, NULL),
+        OSSL_PARAM_size_t(OSSL_RAND_PARAM_MAX_REQUEST, NULL),
         OSSL_PARAM_END,
     };
     return params;

@@ -20,6 +20,7 @@ typedef struct {
     OSRAND_PROV_CTX *provctx;
     /* Random device if device used */
     OSRAND_RANDOM_DEVICE rd;
+    int state;
 } OSRAND_RAND_CTX;
 
 int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
