@@ -195,12 +195,10 @@ int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
     int ret;
 
     p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_STATE);
-    if (p != NULL && !OSSL_PARAM_set_int(p, ctx->state))
-        return 0;
+    if (p != NULL && !OSSL_PARAM_set_int(p, ctx->state)) return 0;
 
     p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_STRENGTH);
-    if (p != NULL && !OSSL_PARAM_set_uint(p, 256))
-        return 0;
+    if (p != NULL && !OSSL_PARAM_set_uint(p, 256)) return 0;
 
     p = OSSL_PARAM_locate(params, OSSL_RAND_PARAM_MAX_REQUEST);
     if (p != NULL) {
@@ -216,8 +214,8 @@ int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
 const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
 {
     static const OSSL_PARAM params[] = {
-	OSSL_PARAM_int(OSSL_RAND_PARAM_STATE, NULL),
-	OSSL_PARAM_uint(OSSL_RAND_PARAM_STRENGTH, NULL),
+        OSSL_PARAM_int(OSSL_RAND_PARAM_STATE, NULL),
+        OSSL_PARAM_uint(OSSL_RAND_PARAM_STRENGTH, NULL),
         OSSL_PARAM_size_t(OSSL_RAND_PARAM_MAX_REQUEST, NULL),
         OSSL_PARAM_END,
     };
