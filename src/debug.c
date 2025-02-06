@@ -14,7 +14,7 @@
 #include <string.h>
 
 int osrand_debug_level = -1;
-FILE *stddebug = NULL;
+static FILE *stddebug = NULL;
 
 /* this function relies on being called by OSRAND_debug, after
  * an __atomic_compare_exchange_n sets osrand_debug_level to -1,
