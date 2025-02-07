@@ -32,7 +32,7 @@ void osrand_raise(OSRAND_PROV_CTX *ctx, const char *file, int line,
 }
 
 /* RAND methods */
-const OSSL_DISPATCH osrand_rand_functions[] = {
+static const OSSL_DISPATCH osrand_rand_functions[] = {
     { OSSL_FUNC_RAND_NEWCTX, (void (*)(void))osrand_newctx },
     { OSSL_FUNC_RAND_FREECTX, (void (*)(void))osrand_freectx },
     { OSSL_FUNC_RAND_INSTANTIATE, (void (*)(void))osrand_instantiate },
