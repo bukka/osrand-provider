@@ -119,11 +119,10 @@ static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
 
 /* RAND generate function */
 int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
-                    unsigned int strength, int prediction_resistance)
+                    unsigned int ossl_unused strength,
+                    int ossl_unused prediction_resistance)
 {
     OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
-    (void)strength;
-    (void)prediction_resistance;
 
     switch (ctx->provctx->mode) {
     case OSRAND_MODE_GETRANDOM:
@@ -138,9 +137,11 @@ int osrand_generate(void *vctx, unsigned char *buf, size_t buflen,
 }
 
 /* RAND reseed function */
-int osrand_reseed(void *pctx, int prediction_resistance,
-                  const unsigned char *entropy, size_t ent_len,
-                  const unsigned char *adin, size_t adin_len)
+int osrand_reseed(void ossl_unused *pctx, int ossl_unused prediction_resistance,
+                  const unsigned char ossl_unused *entropy,
+                  size_t ossl_unused ent_len,
+                  const unsigned char ossl_unused *adin,
+                  size_t ossl_unused adin_len)
 {
     return RET_OSSL_OK;
 }
@@ -170,9 +171,11 @@ void osrand_freectx(void *vctx)
     OPENSSL_free(ctx);
 }
 
-int osrand_instantiate(void *vctx, unsigned int strength,
-                       int prediction_resistance, const unsigned char *pstr,
-                       size_t pstr_len, const OSSL_PARAM params[])
+int osrand_instantiate(void *vctx, unsigned int ossl_unused strength,
+                       int ossl_unused prediction_resistance,
+                       const unsigned char ossl_unused *pstr,
+                       size_t ossl_unused pstr_len,
+                       const OSSL_PARAM ossl_unused params[])
 {
     OSRAND_RAND_CTX *ctx = (OSRAND_RAND_CTX *)vctx;
     ctx->state = EVP_RAND_STATE_READY;
@@ -211,7 +214,8 @@ int osrand_get_ctx_params(void *vctx, OSSL_PARAM params[])
     return RET_OSSL_OK;
 }
 
-const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
+const OSSL_PARAM *osrand_gettable_ctx_params(void ossl_unused *ctx,
+                                             void ossl_unused *prov)
 {
     static const OSSL_PARAM params[] = {
         OSSL_PARAM_int(OSSL_RAND_PARAM_STATE, NULL),
@@ -222,7 +226,8 @@ const OSSL_PARAM *osrand_gettable_ctx_params(void *ctx, void *prov)
     return params;
 }
 
-const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov)
+const OSSL_PARAM *osrand_settable_ctx_params(void ossl_unused *ctx,
+                                             void ossl_unused *prov)
 {
     static const OSSL_PARAM params[] = {
         OSSL_PARAM_END,
@@ -230,17 +235,17 @@ const OSSL_PARAM *osrand_settable_ctx_params(void *ctx, void *prov)
     return params;
 }
 
-int osrand_enable_locking(void *pctx)
+int osrand_enable_locking(void ossl_unused *pctx)
 {
     return RET_OSSL_OK;
 }
 
-int osrand_lock(void *pctx)
+int osrand_lock(void ossl_unused *pctx)
 {
     return RET_OSSL_OK;
 }
 
-void osrand_unlock(void *pctx)
+void osrand_unlock(void ossl_unused *pctx)
 {
     /* nothing to do */
 }
