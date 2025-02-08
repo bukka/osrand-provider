@@ -55,8 +55,9 @@ static const OSSL_ALGORITHM osrand_algs[] = { { "OS-DRBG", "provider=osrand",
                                               { NULL, NULL, NULL } };
 
 /* Provider query */
-static const OSSL_ALGORITHM *
-osrand_query_operation(void *provctx, int operation_id, int *no_store)
+static const OSSL_ALGORITHM *osrand_query_operation(void ossl_unused *provctx,
+                                                    int operation_id,
+                                                    int ossl_unused *no_store)
 {
     switch (operation_id) {
     case OSSL_OP_RAND:
