@@ -98,23 +98,29 @@ static int osrand_generate_from_device(OSRAND_RAND_CTX *ctx,
 static int osrand_generate_using_getrandom(OSRAND_RAND_CTX *ctx,
                                            unsigned char *buf, size_t buflen)
 {
-    ssize_t ret = getrandom(buf, buflen, 0);
-    if (ret < 0) {
-        OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
-                     "Failed to get %zu bytes using getrandom due error",
-                     buflen);
-        return 0;
-    } else if ((size_t)ret != buflen) {
+    ssize_t total_read = 0, ret;
+    do {
+        ret = getrandom(buf, buflen, 0);
+        if (ret < 0) {
+            OSRAND_raise(ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
+                         "Failed to get %zu bytes using getrandom due error",
+                         buflen);
+            return 0;
+        }
+        total_read += ret;
+    } while (total_read < (ssize_t)buflen && ret > 0);
+
+    if ((size_t)total_read != buflen) {
         OSRAND_raise(
             ctx->provctx, OSRAND_E_DEVICE_READ_FAIL,
             "Failed to get %zu bytes using getrandom, only %zd received",
-            buflen, ret);
+            buflen, total_read);
         return 0;
     }
 
     OSRAND_debug("Generated %zu bytes using getrandom", buflen);
 
-    return ((size_t)ret != buflen) ? 0 : 1;
+    return 1;
 }
 
 /* RAND generate function */
